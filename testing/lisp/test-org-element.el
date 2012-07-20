@@ -65,6 +65,102 @@ Some other text
 
 
 
+;;; Test Setters
+
+(ert-deftest test-org-element/put-property ()
+  "Test `org-element-put-property' specifications."
+  (org-test-with-temp-text "* Headline\n *a*"
+    (let ((tree (org-element-parse-buffer)))
+      (org-element-put-property
+       (org-element-map tree 'bold 'identity nil t) :test 1)
+      (should (org-element-property
+	       :test (org-element-map tree 'bold 'identity nil t))))))
+
+(ert-deftest test-org-element/set-contents ()
+  "Test `org-element-set-contents' specifications."
+  ;; Accept multiple entries.
+  (should
+   (equal '("b" (italic nil "a"))
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-set-contents
+	       (org-element-map tree 'bold 'identity nil t) "b" '(italic nil "a"))
+	      (org-element-contents
+	       (org-element-map tree 'bold 'identity nil t))))))
+  ;; Accept atoms and elements.
+  (should
+   (equal '("b")
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-set-contents
+	       (org-element-map tree 'bold 'identity nil t) "b")
+	      (org-element-contents
+	       (org-element-map tree 'bold 'identity nil t))))))
+  (should
+   (equal '((italic nil "b"))
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-set-contents
+	       (org-element-map tree 'bold 'identity nil t) '(italic nil "b"))
+	      (org-element-contents
+	       (org-element-map tree 'bold 'identity nil t))))))
+  ;; Allow nil contents.
+  (should-not
+   (org-test-with-temp-text "* Headline\n *a*"
+     (let ((tree (org-element-parse-buffer)))
+       (org-element-set-contents (org-element-map tree 'bold 'identity nil t))
+       (org-element-contents (org-element-map tree 'bold 'identity nil t))))))
+
+(ert-deftest test-org-element/set-element ()
+  "Test `org-element-set-element' specifications."
+  (org-test-with-temp-text "* Headline\n*a*"
+    (let ((tree (org-element-parse-buffer)))
+      (org-element-set-element
+       (org-element-map tree 'bold 'identity nil t)
+       '(italic nil "b"))
+      ;; Check if object is correctly replaced.
+      (should (org-element-map tree 'italic 'identity))
+      (should-not (org-element-map tree 'bold 'identity))
+      ;; Check if new object's parent is correctly set.
+      (should
+       (eq
+	(org-element-property :parent
+			      (org-element-map tree 'italic 'identity nil t))
+	(org-element-map tree 'paragraph 'identity nil t))))))
+
+(ert-deftest test-org-element/adopt-element ()
+  "Test `org-element-adopt-element' specifications."
+  ;; Adopt an element.
+  (should
+   (equal '(italic plain-text)
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-adopt-element
+	       (org-element-map tree 'bold 'identity nil t) '(italic nil "a"))
+	      (mapcar (lambda (blob) (org-element-type blob))
+		      (org-element-contents
+		       (org-element-map tree 'bold 'identity nil t)))))))
+  ;; Adopt a string.
+  (should
+   (equal '("b" "a")
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-adopt-element
+	       (org-element-map tree 'bold 'identity nil t) "b")
+	      (org-element-contents
+	       (org-element-map tree 'bold 'identity nil t))))))
+  ;; Test APPEND optional argument.
+  (should
+   (equal '("a" "b")
+	  (org-test-with-temp-text "* Headline\n *a*"
+	    (let ((tree (org-element-parse-buffer)))
+	      (org-element-adopt-element
+	       (org-element-map tree 'bold 'identity nil t) "b" t)
+	      (org-element-contents
+	       (org-element-map tree 'bold 'identity nil t)))))))
+
+
+
 ;;; Test Parsers
 
 ;;;; Babel Call
@@ -132,27 +228,24 @@ Some other text
 (ert-deftest test-org-element/clock-parser ()
   "Test `clock' parser."
   ;; Running clock.
-  (should
-   (equal
-    (let ((org-clock-string "CLOCK:"))
-      (org-test-with-temp-text "CLOCK: [2012-01-01 sun. 00:01]"
-	(org-element-map
-	 (org-element-parse-buffer) 'clock 'identity nil t)))
-    '(clock
-      (:status running :value "[2012-01-01 sun. 00:01]" :time nil :begin 1
-	       :end 31 :post-blank 0))))
+  (let* ((org-clock-string "CLOCK:")
+	 (clock (org-test-with-temp-text "CLOCK: [2012-01-01 sun. 00:01]"
+		  (org-element-map
+		   (org-element-parse-buffer) 'clock 'identity nil t))))
+    (should (eq (org-element-property :status clock) 'running))
+    (should (equal (org-element-property :value clock)
+		   "[2012-01-01 sun. 00:01]"))
+    (should-not (org-element-property :time clock)))
   ;; Closed clock.
-  (should
-   (equal
-    (let ((org-clock-string "CLOCK:"))
-      (org-test-with-temp-text "
+  (let* ((org-clock-string "CLOCK:")
+	 (clock (org-test-with-temp-text "
 CLOCK: [2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02] =>  0:01"
-	(org-element-map
-	 (org-element-parse-buffer) 'clock 'identity nil t)))
-    '(clock
-      (:status closed
-	       :value "[2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02]"
-	       :time "0:01" :begin 2 :end 66 :post-blank 0)))))
+		  (org-element-map
+		   (org-element-parse-buffer) 'clock 'identity nil t))))
+    (should (eq (org-element-property :status clock) 'closed))
+    (should (equal (org-element-property :value clock)
+		   "[2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02]"))
+    (should (equal (org-element-property :time clock) "0:01"))))
 
 
 ;;;; Code
@@ -345,97 +438,95 @@ CLOCK: [2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02] =>  0:01"
   (let ((org-coderef-label-format "(ref:%s)"))
     ;; 1. Test "-i" switch.
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
-	(should-not (org-element-property :preserve-indent element))))
+      (should-not
+       (org-element-property :preserve-indent (org-element-at-point))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp -i\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
-	(should (org-element-property :preserve-indent element))))
+      (should (org-element-property :preserve-indent (org-element-at-point))))
     (org-test-with-temp-text "#+BEGIN_EXAMPLE\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
-	(should-not (org-element-property :preserve-indent element))))
+      (should-not
+       (org-element-property :preserve-indent (org-element-at-point))))
     (org-test-with-temp-text "#+BEGIN_EXAMPLE -i\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
-	(should (org-element-property :preserve-indent element))))
+      (should (org-element-property :preserve-indent (org-element-at-point))))
     ;; 2. "-n -r -k" combination should number lines, retain labels but
     ;;    not use them in coderefs.
     (org-test-with-temp-text "#+BEGIN_EXAMPLE -n -r -k\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (not (org-element-property :use-labels element))))))
     (org-test-with-temp-text
 	"#+BEGIN_SRC emacs-lisp -n -r -k\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (not (org-element-property :use-labels element))))))
     ;; 3. "-n -r" combination should number-lines remove labels and not
     ;;    use them in coderefs.
     (org-test-with-temp-text "#+BEGIN_EXAMPLE -n -r\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (not (org-element-property :retain-labels element))
 		     (not (org-element-property :use-labels element))))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp -n -r\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (not (org-element-property :retain-labels element))
 		     (not (org-element-property :use-labels element))))))
     ;; 4. "-n" or "+n" should number lines, retain labels and use them
     ;;    in coderefs.
     (org-test-with-temp-text "#+BEGIN_EXAMPLE -n\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp -n\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     (org-test-with-temp-text "#+BEGIN_EXAMPLE +n\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp +n\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (org-element-property :number-lines element)
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     ;; 5. No switch should not number lines, but retain labels and use
     ;;    them in coderefs.
     (org-test-with-temp-text "#+BEGIN_EXAMPLE\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (not (org-element-property :number-lines element))
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (not (org-element-property :number-lines element))
 		     (org-element-property :retain-labels element)
 		     (org-element-property :use-labels element)))))
     ;; 6. "-r" switch only: do not number lines, remove labels, and
     ;;    don't use labels in coderefs.
     (org-test-with-temp-text "#+BEGIN_EXAMPLE -r\nText.\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (not (org-element-property :number-lines element))
 		     (not (org-element-property :retain-labels element))
 		     (not (org-element-property :use-labels element))))))
     (org-test-with-temp-text "#+BEGIN_SRC emacs-lisp -r\n(+ 1 1)\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should (and (not (org-element-property :number-lines element))
 		     (not (org-element-property :retain-labels element))
 		     (not (org-element-property :use-labels element))))))
     ;; 7. Recognize coderefs with user-defined syntax.
     (org-test-with-temp-text
 	"#+BEGIN_EXAMPLE -l \"[ref:%s]\"\nText [ref:text]\n#+END_EXAMPLE"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should
 	 (equal (org-element-property :label-fmt element) "[ref:%s]"))))
     (org-test-with-temp-text
 	"#+BEGIN_SRC emacs-lisp -l \"[ref:%s]\"\n(+ 1 1) [ref:text]\n#+END_SRC"
-      (let ((element (org-element-current-element)))
+      (let ((element (org-element-at-point)))
 	(should
 	 (equal (org-element-property :label-fmt element) "[ref:%s]"))))))
 
@@ -474,7 +565,7 @@ CLOCK: [2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02] =>  0:01"
   (should
    (equal
     '("back-end" . "contents")
-    (org-test-with-temp-text "<back-end@contents>"
+    (org-test-with-temp-text "@@back-end:contents@@"
       (org-element-map
        (org-element-parse-buffer) 'export-snippet
        (lambda (snippet) (cons (org-element-property :back-end snippet)
@@ -819,11 +910,8 @@ DEADLINE: <2012-03-29 thu.>"
      (org-element-map (org-element-parse-buffer) 'keyword 'identity)))
   ;; Keywords are case-insensitive.
   (should
-   (equal
-    (org-test-with-temp-text "#+KEYWORD: value"
-      (org-element-map (org-element-parse-buffer) 'keyword 'identity))
-    (org-test-with-temp-text "#+keyword: value"
-      (org-element-map (org-element-parse-buffer) 'keyword 'identity))))
+   (org-test-with-temp-text "#+keyword: value"
+     (org-element-map (org-element-parse-buffer) 'keyword 'identity)))
   ;; Affiliated keywords are not keywords.
   (should-not
    (org-test-with-temp-text "#+NAME: value
@@ -1051,21 +1139,21 @@ Outside list"
      :closed
      (org-test-with-temp-text "CLOSED: [2012-03-29 thu.]"
        (org-element-map (org-element-parse-buffer) 'planning 'identity nil t)))
-    "[2012-03-29 thu.]"))
+    "2012-03-29 thu."))
   (should
    (equal
     (org-element-property
      :deadline
      (org-test-with-temp-text "DEADLINE: <2012-03-29 thu.>"
        (org-element-map (org-element-parse-buffer) 'planning 'identity nil t)))
-    "<2012-03-29 thu.>"))
+    "2012-03-29 thu."))
   (should
    (equal
     (org-element-property
      :scheduled
      (org-test-with-temp-text "SCHEDULED: <2012-03-29 thu.>"
        (org-element-map (org-element-parse-buffer) 'planning 'identity nil t)))
-    "<2012-03-29 thu.>")))
+    "2012-03-29 thu.")))
 
 
 ;;;; Property Drawer
@@ -1166,17 +1254,12 @@ Outside list"
 (ert-deftest test-org-element/special-block-parser ()
   "Test `special-block' parser."
   ;; Standard test.
-  (should
-   (equal
-    (org-test-with-temp-text "#+BEGIN_SPECIAL\nText\n#+END_SPECIAL"
-      (org-element-map
-       (org-element-parse-buffer) 'special-block 'identity nil t))
-    '(special-block
-      (:type "SPECIAL" :begin 1 :end 35 :hiddenp nil :contents-begin 17
-	     :contents-end 22 :post-blank 0)
-      (paragraph
-       (:begin 17 :end 22 :contents-begin 17 :contents-end 21 :post-blank 0)
-       "Text"))))
+  (let ((special-block
+	 (org-test-with-temp-text "#+BEGIN_SPECIAL\nText\n#+END_SPECIAL"
+	   (org-element-map
+	    (org-element-parse-buffer) 'special-block 'identity nil t))))
+    (should (equal (org-element-property :type special-block) "SPECIAL"))
+    (should (org-element-map special-block 'paragraph 'identity)))
   ;; Test folded block.
   (org-test-with-temp-text "#+BEGIN_SPECIAL\nText\n#+END_SPECIAL"
     (org-cycle)
@@ -1249,7 +1332,7 @@ Outside list"
     '("first line\nsecond line"))))
 
 
-;;; Subscript
+;;;; Subscript
 
 (ert-deftest test-org-element/subscript-parser ()
   "Test `subscript' parser."
@@ -1263,7 +1346,7 @@ Outside list"
      (org-element-map (org-element-parse-buffer) 'subscript 'identity))))
 
 
-;;; Superscript
+;;;; Superscript
 
 (ert-deftest test-org-element/superscript-parser ()
   "Test `superscript' parser."
@@ -1337,11 +1420,27 @@ Outside list"
   ;; Active timestamp.
   (should
    (org-test-with-temp-text "<2012-03-29 16:40>"
-     (org-element-map (org-element-parse-buffer) 'timestamp 'identity)))
+     (eq (org-element-property :type
+			       (org-element-map
+				(org-element-parse-buffer)
+				'timestamp 'identity nil t))
+	 'active)))
   ;; Inactive timestamp.
   (should
    (org-test-with-temp-text "[2012-03-29 16:40]"
-     (org-element-map (org-element-parse-buffer) 'timestamp 'identity)))
+     (eq (org-element-property :type
+			       (org-element-map
+				(org-element-parse-buffer)
+				'timestamp 'identity nil t))
+	 'inactive)))
+  ;; Date range.
+  (should
+   (org-test-with-temp-text "[2012-03-29 16:40]--[2012-03-29 16:41]"
+     (eq (org-element-property :type
+			       (org-element-map
+				(org-element-parse-buffer)
+				'timestamp 'identity nil t))
+	 'inactive-range)))
   ;; Timestamps are not planning elements.
   (should-not
    (org-test-with-temp-text "SCHEDULED: <2012-03-29 16:40>"
@@ -1563,26 +1662,31 @@ Outside list"
 
 (ert-deftest test-org-element/plain-list-interpreter ()
   "Test plain-list and item interpreters."
-  ;; 1. Unordered list.
-  (should (equal (org-test-parse-and-interpret "- item 1") "- item 1\n"))
-  ;; 2. Description list.
-  (should
-   (equal (org-test-parse-and-interpret "- tag :: desc") "- tag :: desc\n"))
-  ;; 3. Ordered list.
-  (should
-   (equal (let ((org-plain-list-ordered-item-terminator t))
-	    (org-test-parse-and-interpret "1. Item"))
-	  "1. Item\n"))
-  ;; 4. Ordered list with counter.
-  (should
-   (equal (let ((org-plain-list-ordered-item-terminator t))
-	    (org-test-parse-and-interpret "1. [@5] Item"))
-	  "5. [@5] Item\n"))
-  ;; 5. List with check-boxes.
-  (should
-   (equal (org-test-parse-and-interpret
-	   "- [-] Item 1\n  - [X] Item 2\n  - [ ] Item 3")
-	  "- [-] Item 1\n  - [X] Item 2\n  - [ ] Item 3\n")))
+  (let ((org-list-two-spaces-after-bullet-regexp nil))
+    ;; 1. Unordered list.
+    (should (equal (org-test-parse-and-interpret "- item 1") "- item 1\n"))
+    ;; 2. Description list.
+    (should
+     (equal (org-test-parse-and-interpret "- tag :: desc") "- tag :: desc\n"))
+    ;; 3. Ordered list.
+    (should
+     (equal (let ((org-plain-list-ordered-item-terminator t))
+	      (org-test-parse-and-interpret "1. Item"))
+	    "1. Item\n"))
+    ;; 4. Ordered list with counter.
+    (should
+     (equal (let ((org-plain-list-ordered-item-terminator t))
+	      (org-test-parse-and-interpret "1. [@5] Item"))
+	    "5. [@5] Item\n"))
+    ;; 5. List with check-boxes.
+    (should
+     (equal (org-test-parse-and-interpret
+	     "- [-] Item 1\n  - [X] Item 2\n  - [ ] Item 3")
+	    "- [-] Item 1\n  - [X] Item 2\n  - [ ] Item 3\n"))
+    ;; 6. Item not starting with a paragraph.
+    (should
+     (equal (org-test-parse-and-interpret "-\n  | a | b |")
+	    "- \n  | a | b |\n"))))
 
 (ert-deftest test-org-element/quote-block-interpreter ()
   "Test quote block interpreter."
@@ -1691,9 +1795,9 @@ CLOCK: [2012-01-01 sun. 00:01]--[2012-01-01 sun. 00:02] =>  0:01"))
      (equal
       (org-test-parse-and-interpret
        "* Headline
-CLOSED: <2012-01-01> DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>")
+CLOSED: [2012-01-01] DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>")
       "* Headline
-CLOSED: <2012-01-01> DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>\n"))))
+CLOSED: [2012-01-01] DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>\n"))))
 
 (ert-deftest test-org-element/property-drawer-interpreter ()
   "Test property drawer interpreter."
@@ -1706,14 +1810,16 @@ CLOSED: <2012-01-01> DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>\n"))))
   "Test src block interpreter."
   ;; With arguments.
   (should
-   (equal (org-test-parse-and-interpret
-	   "#+BEGIN_SRC emacs-lisp :results silent\n(+ 1 1)\n#+END_SRC")
-	  "#+BEGIN_SRC emacs-lisp :results silent\n(+ 1 1)\n#+END_SRC\n"))
+   (equal (let ((org-edit-src-content-indentation 2))
+	    (org-test-parse-and-interpret
+	     "#+BEGIN_SRC emacs-lisp :results silent\n(+ 1 1)\n#+END_SRC"))
+	  "#+BEGIN_SRC emacs-lisp :results silent\n  (+ 1 1)\n#+END_SRC\n"))
   ;; With switches.
   (should
-   (equal (org-test-parse-and-interpret
-	   "#+BEGIN_SRC emacs-lisp -n -k\n(+ 1 1)\n#+END_SRC")
-	  "#+BEGIN_SRC emacs-lisp -n -k\n(+ 1 1)\n#+END_SRC\n")))
+   (equal (let ((org-edit-src-content-indentation 2))
+	    (org-test-parse-and-interpret
+	     "#+BEGIN_SRC emacs-lisp -n -k\n(+ 1 1)\n#+END_SRC"))
+	  "#+BEGIN_SRC emacs-lisp -n -k\n  (+ 1 1)\n#+END_SRC\n")))
 
 (ert-deftest test-org-element/table-interpreter ()
   "Test table, table-row and table-cell interpreters."
@@ -1737,6 +1843,29 @@ CLOSED: <2012-01-01> DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>\n"))))
    (equal (org-test-parse-and-interpret
 	   "| 2 |\n| 4 |\n| 3 |\n#+TBLFM: test1\n#+TBLFM: test2")
 	  "| 2 |\n| 4 |\n| 3 |\n#+TBLFM: test1\n#+TBLFM: test2\n")))
+
+(ert-deftest test-org-element/timestamp-interpreter ()
+  "Test timestamp interpreter."
+  ;; Active.
+  (should (equal (org-test-parse-and-interpret "<2012-03-29 16:40>")
+		 "<2012-03-29 16:40>\n"))
+  ;; Inactive.
+  (should (equal (org-test-parse-and-interpret "[2012-03-29 16:40]")
+		 "[2012-03-29 16:40]\n"))
+  ;; Active range.
+  (should (equal (org-test-parse-and-interpret
+		  "<2012-03-29 16:40>--<2012-03-29 16:41>")
+		 "<2012-03-29 16:40>--<2012-03-29 16:41>\n"))
+  ;; Inactive range.
+  (should (equal (org-test-parse-and-interpret
+		  "[2012-03-29 16:40]--[2012-03-29 16:41]")
+		 "[2012-03-29 16:40]--[2012-03-29 16:41]\n"))
+  ;; Diary.
+  (should (equal (org-test-parse-and-interpret "<%%org-float t 4 2>")
+		 "<%%org-float t 4 2>\n"))
+  ;; Timestamp with repeater interval.
+  (should (equal (org-test-parse-and-interpret "<2012-03-29 +1y>")
+		 "<2012-03-29 +1y>\n")))
 
 (ert-deftest test-org-element/verse-block-interpreter ()
   "Test verse block interpretation."
@@ -1763,8 +1892,8 @@ CLOSED: <2012-01-01> DEADLINE: <2012-01-01> SCHEDULED: <2012-01-01>\n"))))
 
 (ert-deftest test-org-element/export-snippet-interpreter ()
   "Test export snippet interpreter."
-  (should (equal (org-test-parse-and-interpret "<back-end@contents>")
-		 "<back-end@contents>\n")))
+  (should (equal (org-test-parse-and-interpret "@@back-end:contents@@")
+		 "@@back-end:contents@@\n")))
 
 (ert-deftest test-org-element/footnote-reference-interpreter ()
   "Test footnote reference interpreter."
@@ -1987,6 +2116,39 @@ Paragraph \\alpha."
 
 
 
+;;; Test `:parent' Property
+
+(ert-deftest test-org-element/parent-property ()
+  "Test `:parent' property."
+  ;; Elements.
+  (org-test-with-temp-text "#+BEGIN_CENTER\nText\n#+END_CENTER"
+    (let* ((tree (org-element-parse-buffer))
+	   (parent (org-element-property
+		    :parent
+		    (org-element-map tree 'paragraph 'identity nil t))))
+      (should parent)
+      (should (eq (org-element-map tree 'center-block 'identity nil t)
+		  parent))))
+  ;; Objects.
+  (org-test-with-temp-text "a_{/b/}"
+    (let* ((tree (org-element-parse-buffer))
+	   (parent (org-element-property
+		    :parent
+		    (org-element-map tree 'italic 'identity nil t))))
+      (should parent)
+      (should (eq parent
+		  (org-element-map tree 'subscript 'identity nil t)))))
+  ;; Secondary strings
+  (org-test-with-temp-text "* /italic/"
+    (let* ((tree (org-element-parse-buffer))
+	   (parent (org-element-property
+		    :parent (org-element-map tree 'italic 'identity nil t))))
+      (should parent)
+      (should (eq parent
+		  (org-element-map tree 'headline 'identity nil t))))))
+
+
+
 ;;; Test Normalize Contents
 
 (ert-deftest test-org-element/normalize-contents ()
@@ -2043,6 +2205,25 @@ Paragraph \\alpha."
    (eq 'plain-list
        (org-test-with-temp-text "- item"
 	 (org-element-type (org-element-at-point))))))
+
+(ert-deftest test-org-element/context ()
+  "Test `org-element-context' specifications."
+  ;; List all objects and elements containing point.
+  (should
+   (equal
+    '(subscript bold paragraph)
+    (mapcar 'car
+	    (org-test-with-temp-text "Some *text with _underline_*"
+	      (progn (search-forward "under")
+		     (org-element-context))))))
+  ;; Find objects in secondary strings.
+  (should
+   (equal
+    '(underline headline)
+    (mapcar 'car
+	    (org-test-with-temp-text "* Headline _with_ underlining"
+	      (progn (search-forward "w")
+		     (org-element-context)))))))
 
 (ert-deftest test-org-element/forward ()
   "Test `org-element-forward' specifications."
