@@ -1,11 +1,10 @@
 ;;; ob-keys.el --- key bindings for org-babel
 
-;; Copyright (C) 2009, 2010  Free Software Foundation, Inc.
+;; Copyright (C) 2009-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -58,6 +57,8 @@ functions which are assigned key bindings, and see
     ("\C-o" . org-babel-open-src-block-result)
     ("\C-v" . org-babel-expand-src-block)
     ("v" . org-babel-expand-src-block)
+    ("u" . org-babel-goto-src-block-head)
+    ("\C-u" . org-babel-goto-src-block-head)
     ("g" . org-babel-goto-named-src-block)
     ("r" . org-babel-goto-named-result)
     ("\C-r" . org-babel-goto-named-result)
@@ -65,21 +66,30 @@ functions which are assigned key bindings, and see
     ("b" . org-babel-execute-buffer)
     ("\C-s" . org-babel-execute-subtree)
     ("s" . org-babel-execute-subtree)
+    ("\C-d" . org-babel-demarcate-block)
+    ("d" . org-babel-demarcate-block)
     ("\C-t" . org-babel-tangle)
     ("t" . org-babel-tangle)
     ("\C-f" . org-babel-tangle-file)
     ("f" . org-babel-tangle-file)
+    ("\C-c" . org-babel-check-src-block)
+    ("c" . org-babel-check-src-block)
+    ("\C-j" . org-babel-insert-header-arg)
+    ("j" . org-babel-insert-header-arg)
     ("\C-l" . org-babel-load-in-session)
     ("l" . org-babel-load-in-session)
     ("\C-i" . org-babel-lob-ingest)
     ("i" . org-babel-lob-ingest)
+    ("\C-I" . org-babel-view-src-block-info)
+    ("I" . org-babel-view-src-block-info)
     ("\C-z" . org-babel-switch-to-session)
     ("z" . org-babel-switch-to-session-with-code)
     ("\C-a" . org-babel-sha1-hash)
     ("a" . org-babel-sha1-hash)
     ("h" . org-babel-describe-bindings)
     ("\C-x" . org-babel-do-key-sequence-in-edit-buffer)
-    ("x" . org-babel-do-key-sequence-in-edit-buffer))
+    ("x" . org-babel-do-key-sequence-in-edit-buffer)
+    ("\C-\M-h" . org-babel-mark-block))
   "Alist of key bindings and interactive Babel functions.
 This list associates interactive Babel functions
 with keys.  Each element of this list will add an entry to the
@@ -88,6 +98,6 @@ a-list placed behind the generic `org-babel-key-prefix'.")
 
 (provide 'ob-keys)
 
-;; arch-tag: 01e348ee-4906-46fa-839a-6b7b6f989048
+
 
 ;;; ob-keys.el ends here

@@ -1,11 +1,10 @@
 ;;; ob-ledger.el --- org-babel functions for ledger evaluation
 
-;; Copyright (C) 2010  Free Software Foundation, Inc.
+;; Copyright (C) 2010-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric S Fraga
 ;; Keywords: literate programming, reproducible research, accounting
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -30,7 +29,7 @@
 ;;
 ;; 1) there is no such thing as a "session" in ledger
 ;;
-;; 2) we are generally only going to return output from the leger program
+;; 2) we are generally only going to return output from the ledger program
 ;;
 ;; 3) we are adding the "cmdline" header argument
 ;;
@@ -38,7 +37,6 @@
 
 ;;; Code:
 (require 'ob)
-(require 'org)
 
 (defvar org-babel-default-header-args:ledger
   '((:results . "output") (:cmdline . "bal"))
@@ -51,12 +49,16 @@ called by `org-babel-execute-src-block'."
   (let ((result-params (split-string (or (cdr (assoc :results params)) "")))
 	(cmdline (cdr (assoc :cmdline params)))
         (in-file (org-babel-temp-file "ledger-"))
-	(out-file (org-babel-temp-file "ledger-output-"))
-	)
+	(out-file (org-babel-temp-file "ledger-output-")))
     (with-temp-file in-file (insert body))
-    (message (concat "ledger -f " in-file " " cmdline))
+    (message "%s" (concat "ledger"
+		     " -f " (org-babel-process-file-name in-file)
+		     " " cmdline))
     (with-output-to-string
-      (shell-command (concat "ledger -f " in-file " " cmdline " > " out-file)))
+      (shell-command (concat "ledger"
+			     " -f " (org-babel-process-file-name in-file)
+			     " " cmdline
+			     " > " (org-babel-process-file-name out-file))))
     (with-temp-buffer (insert-file-contents out-file) (buffer-string))))
 
 (defun org-babel-prep-session:ledger (session params)
@@ -64,6 +66,6 @@ called by `org-babel-execute-src-block'."
 
 (provide 'ob-ledger)
 
-;; arch-tag: 7bbb529e-95a1-4236-9d29-b0000b918c7c
+
 
 ;;; ob-ledger.el ends here

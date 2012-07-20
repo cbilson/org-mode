@@ -1,12 +1,10 @@
 ;;; org-compat.el --- Compatibility code for Org-mode
 
-;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010
-;;   Free Software Foundation, Inc.
+;; Copyright (C) 2004-2012  Free Software Foundation, Inc.
 
 ;; Author: Carsten Dominik <carsten at orgmode dot org>
 ;; Keywords: outlines, hypermedia, calendar, wp
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 ;;
 ;; This file is part of GNU Emacs.
 ;;
@@ -36,7 +34,6 @@
 
 (require 'org-macs)
 
-(declare-function find-library-name "find-func"  (library))
 (declare-function w32-focus-frame "term/w32-win" (frame))
 
 ;; The following constant is for backward compatibility.  We do not use
@@ -162,6 +159,15 @@ If DELETE is non-nil, delete all those overlays."
       (let ((x (org-get-x-clipboard-compat value)))
 	(if x (org-no-properties x)))))
 
+(defsubst org-decompose-region (beg end)
+  "Decompose from BEG to END."
+  (if (featurep 'xemacs)
+      (let ((modified-p (buffer-modified-p))
+	    (buffer-read-only nil))
+	(remove-text-properties beg end '(composition nil))
+	(set-buffer-modified-p modified-p))
+    (decompose-region beg end)))
+
 ;; Miscellaneous functions
 
 (defun org-add-hook (hook function &optional append local)
@@ -197,6 +203,26 @@ ignored in this case."
 	 (shrink-window-if-larger-than-buffer window)))
   (or window (selected-window)))
 
+(defun org-number-sequence (from &optional to inc)
+  "Call `number-sequence or emulate it."
+  (if (fboundp 'number-sequence)
+      (number-sequence from to inc)
+    (if (or (not to) (= from to))
+	(list from)
+      (or inc (setq inc 1))
+      (when (zerop inc) (error "The increment can not be zero"))
+      (let (seq (n 0) (next from))
+	(if (> inc 0)
+	    (while (<= next to)
+	      (setq seq (cons next seq)
+		    n (1+ n)
+		    next (+ from (* n inc))))
+	  (while (>= next to)
+	    (setq seq (cons next seq)
+		  n (1+ n)
+		  next (+ from (* n inc)))))
+	(nreverse seq)))))
+
 ;; Region compatibility
 
 (defvar org-ignore-region nil
@@ -218,6 +244,19 @@ Works on both Emacs and XEmacs."
 	     (> (point) (region-beginning)))
     (exchange-point-and-mark)))
 
+;; Emacs 22 misses `activate-mark'
+(if (fboundp 'activate-mark)
+    (defalias 'org-activate-mark 'activate-mark)
+  (defun org-activate-mark ()
+    (when (mark t)
+      (setq mark-active t)
+      (when (and (boundp 'transient-mark-mode)
+		 (not transient-mark-mode))
+	(setq transient-mark-mode 'lambda))
+      (when (boundp 'zmacs-regions)
+	(setq zmacs-regions t)))))
+
+
 ;; Invisibility compatibility
 
 (defun org-remove-from-invisibility-spec (arg)
@@ -235,7 +274,7 @@ Works on both Emacs and XEmacs."
     nil))
 
 (defmacro org-xemacs-without-invisibility (&rest body)
-  "Turn off exents with invisibility while executing BODY."
+  "Turn off extents with invisibility while executing BODY."
   `(let ((ext-inv (extent-list nil (point-at-bol) (point-at-eol)
 			       'all-extents-closed-open 'invisible))
 	 ext-inv-specs)
@@ -248,6 +287,7 @@ Works on both Emacs and XEmacs."
      (dolist (ext-inv-spec ext-inv-specs)
        (set-extent-property (car ext-inv-spec) 'invisible
 			    (cadr ext-inv-spec)))))
+(def-edebug-spec org-xemacs-without-invisibility (body))
 
 (defun org-indent-to-column (column &optional minimum buffer)
   "Work around a bug with extents with invisibility in XEmacs."
@@ -290,15 +330,8 @@ Works on both Emacs and XEmacs."
       (org-no-properties (substring string (or from 0) to))
     (substring-no-properties string from to)))
 
-(defun org-find-library-name (library)
-  (if (fboundp 'find-library-name)
-      (file-name-directory (find-library-name library))
-    ; XEmacs does not have `find-library-name'
-    (flet ((find-library-name-helper (filename ignored-codesys)
-				     filename)
-	   (find-library-name (library)
-	    (find-library library nil 'find-library-name-helper)))
-      (file-name-directory (find-library-name library)))))
+(defmacro org-find-library-dir (library)
+  `(file-name-directory (locate-library ,library)))
 
 (defun org-count-lines (s)
   "How many lines in string S?"
@@ -343,15 +376,15 @@ TIME defaults to the current time."
       (time-to-seconds (or time (current-time)))
     (float-time time)))
 
-(defun org-string-match-p (&rest args)
-  (if (fboundp 'string-match-p)
-      (apply 'string-match-p args)
+(if (fboundp 'string-match-p)
+    (defalias 'org-string-match-p 'string-match-p)
+  (defun org-string-match-p (regexp string &optional start)
     (save-match-data
-      (apply 'string-match args))))
+      (funcall 'string-match regexp string start))))
 
-(defun org-looking-at-p (&rest args)
-  (if (fboundp 'looking-at-p)
-      (apply 'looking-at-p args)
+(if (fboundp 'looking-at-p)
+    (defalias 'org-looking-at-p 'looking-at-p)
+  (defun org-looking-at-p (&rest args)
     (save-match-data
       (apply 'looking-at args))))
 
@@ -389,8 +422,47 @@ LIMIT."
 	      (looking-at (concat "\\(?:"  regexp "\\)\\'")))))
       (not (null pos)))))
 
-(provide 'org-compat)
+(defun org-floor* (x &optional y)
+  "Return a list of the floor of X and the fractional part of X.
+With two arguments, return floor and remainder of their quotient."
+  (let ((q (floor x y)))
+    (list q (- x (if y (* y q) q)))))
 
-;; arch-tag: a0a0579f-e68c-4bdf-9e55-93768b846bbe
+;; `pop-to-buffer-same-window' has been introduced in Emacs 24.1.
+(defun org-pop-to-buffer-same-window
+  (&optional buffer-or-name norecord label)
+  "Pop to buffer specified by BUFFER-OR-NAME in the selected window."
+  (if (fboundp 'pop-to-buffer-same-window)
+      (funcall
+       'pop-to-buffer-same-window buffer-or-name norecord)
+    (funcall 'switch-to-buffer buffer-or-name norecord)))
+
+;; `condition-case-unless-debug' has been introduced in Emacs 24.1
+;; `condition-case-no-debug' has been introduced in Emacs 23.1
+(defalias 'org-condition-case-unless-debug
+  (or (and (fboundp 'condition-case-unless-debug)
+	   'condition-case-unless-debug)
+      (and (fboundp 'condition-case-no-debug)
+	   'condition-case-no-debug)
+      'condition-case))
+
+(defmacro org-check-version ()
+  "Try very hard to provide sensible version strings."
+  (let* ((org-dir        (org-find-library-dir "org"))
+	 (org-version.el (concat org-dir "org-version.el"))
+	 (org-fixup.el   (concat org-dir "../UTILITIES/org-fixup.el")))
+    (if (require 'org-version org-version.el 'noerror)
+	'(progn
+	   (autoload 'org-release     "org-version.el")
+	   (autoload 'org-git-version "org-version.el"))
+      (if (require 'org-fixup org-fixup.el 'noerror)
+	  '(org-fixup)
+	;; provide fallback definitions and complain
+	(warn "Could not define org version correctly.  Check installation!")
+	'(progn
+	   (defun org-release () "N/A")
+	   (defun org-git-version () "N/A !!check installation!!"))))))
+
+(provide 'org-compat)
 
 ;;; org-compat.el ends here

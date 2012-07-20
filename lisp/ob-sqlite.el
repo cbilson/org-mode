@@ -1,11 +1,10 @@
 ;;; ob-sqlite.el --- org-babel functions for sqlite database interaction
 
-;; Copyright (C) 2010  Free Software Foundation
+;; Copyright (C) 2010-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -28,6 +27,7 @@
 
 ;;; Code:
 (require 'ob)
+(require 'ob-eval)
 (require 'ob-ref)
 
 (declare-function org-fill-template "org" (template alist))
@@ -37,13 +37,24 @@
 
 (defvar org-babel-default-header-args:sqlite '())
 
-(defvar org-babel-header-arg-names:sqlite
-  '(db header echo bail csv column html line list separator nullvalue)
+(defvar org-babel-header-args:sqlite
+  '((db        . :any)
+    (header    . :any)
+    (echo      . :any)
+    (bail      . :any)
+    (csv       . :any)
+    (column    . :any)
+    (html      . :any)
+    (line      . :any)
+    (list      . :any)
+    (separator . :any)
+    (nullvalue . :any))
   "Sqlite specific header args.")
 
-(defun org-babel-expand-body:sqlite (body params &optional processed-params)
+(defun org-babel-expand-body:sqlite (body params)
+  "Expand BODY according to the values of PARAMS."
   (org-babel-sqlite-expand-vars
-   body (or (nth 1 processed-params) (org-babel-ref-variables params))))
+   body (mapcar #'cdr (org-babel-get-header params :var))))
 
 (defvar org-babel-sqlite3-command "sqlite3")
 
@@ -51,7 +62,6 @@
   "Execute a block of Sqlite code with Babel.
 This function is called by `org-babel-execute-src-block'."
   (let ((result-params (split-string (or (cdr (assoc :results params)) "")))
-	(vars (org-babel-ref-variables params))
 	(db (cdr (assoc :db params)))
 	(separator (cdr (assoc :separator params)))
 	(nullvalue (cdr (assoc :nullvalue params)))
@@ -64,16 +74,10 @@ This function is called by `org-babel-execute-src-block'."
     (unless db (error "ob-sqlite: can't evaluate without a database."))
     (with-temp-buffer
       (insert
-       (shell-command-to-string
+       (org-babel-eval
 	(org-fill-template
-	 "%cmd -init %body %header %separator %nullvalue %others %csv %db "
+	 "%cmd %header %separator %nullvalue %others %csv %db "
 	 (list
-	  (cons "body" ((lambda (sql-file)
-			  (with-temp-file sql-file
-			    (insert (org-babel-expand-body:sqlite
-				     body nil (list nil vars))))
-			  sql-file)
-			(org-babel-temp-file "sqlite-sql-")))
 	  (cons "cmd" org-babel-sqlite3-command)
 	  (cons "header" (if headers-p "-header" "-noheader"))
 	  (cons "separator"
@@ -90,13 +94,23 @@ This function is called by `org-babel-execute-src-block'."
 			      (member :html others) separator)
 			  ""
 			"-csv"))
-	  (cons "db " db)))))
+	  (cons "db " db)))
+	;; body of the code block
+	(org-babel-expand-body:sqlite body params)))
       (if (or (member "scalar" result-params)
+	      (member "verbatim" result-params)
 	      (member "html" result-params)
 	      (member "code" result-params)
 	      (equal (point-min) (point-max)))
 	  (buffer-string)
-	(org-table-convert-region (point-min) (point-max))
+	(org-table-convert-region (point-min) (point-max)
+				  (if (or (member :csv others)
+					  (member :column others)
+					  (member :line others)
+					  (member :list others)
+					  (member :html others) separator)
+				      nil
+				    '(4)))
 	(org-babel-sqlite-table-or-scalar
 	 (org-babel-sqlite-offset-colnames
 	  (org-table-to-lisp) headers-p))))))
@@ -147,6 +161,6 @@ Prepare SESSION according to the header arguments specified in PARAMS."
 
 (provide 'ob-sqlite)
 
-;; arch-tag: 5c03d7f2-0f72-48b8-bbd1-35aafea248ac
+
 
 ;;; ob-sqlite.el ends here

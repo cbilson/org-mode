@@ -1,11 +1,10 @@
 ;;; org-id.el --- Global identifiers for Org-mode entries
 ;;
-;; Copyright (C) 2008, 2009, 2010 Free Software Foundation, Inc.
+;; Copyright (C) 2008-2012 Free Software Foundation, Inc.
 ;;
 ;; Author: Carsten Dominik <carsten at orgmode dot org>
 ;; Keywords: outlines, hypermedia, calendar, wp
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 ;;
 ;; This file is part of GNU Emacs.
 ;;
@@ -74,6 +73,8 @@
 (require 'org)
 
 (declare-function message-make-fqdn "message" ())
+(declare-function org-pop-to-buffer-same-window
+		  "org-compat" (&optional buffer-or-name norecord label))
 
 ;;; Customization
 
@@ -151,9 +152,7 @@ This variable is only relevant when `org-id-track-globally' is set."
   :type 'file)
 
 (defvar org-id-locations nil
-  "List of files with IDs in those files.
-Depending on `org-id-use-hash' this can also be a hash table mapping IDs
-to files.")
+  "List of files with IDs in those files.")
 
 (defvar org-id-files nil
   "List of files that contain IDs.")
@@ -231,7 +230,7 @@ It returns the ID of the entry.  If necessary, the ID is created."
 	 (org-refile-use-outline-path
 	  (if (caar org-refile-targets) 'file t))
 	 (org-refile-target-verify-function nil)
-	 (spos (org-refile-get-location "Entry: "))
+	 (spos (org-refile-get-location "Entry"))
 	 (pom (and spos (move-marker (make-marker) (nth 3 spos)
 				     (get-file-buffer (nth 1 spos))))))
     (prog1 (org-id-get pom 'create)
@@ -255,7 +254,7 @@ Move the cursor to that entry in that buffer."
   (let ((m (org-id-find id 'marker)))
     (unless m
       (error "Cannot find entry with ID \"%s\"" id))
-    (switch-to-buffer (marker-buffer m))
+    (org-pop-to-buffer-same-window (marker-buffer m))
     (goto-char m)
     (move-marker m nil)
     (org-show-context)))
@@ -274,7 +273,7 @@ With optional argument MARKERP, return the position as a new marker."
     (when file
       (setq where (org-id-find-id-in-file id file markerp)))
     (unless where
-      (org-id-update-id-locations)
+      (org-id-update-id-locations nil t)
       (setq file (org-id-find-id-file id))
       (when file
 	(setq where (org-id-find-id-in-file id file markerp))))
@@ -404,7 +403,7 @@ and time is the usual three-integer representation of time."
 
 ;; Storing ID locations (files)
 
-(defun org-id-update-id-locations (&optional files)
+(defun org-id-update-id-locations (&optional files silent)
   "Scan relevant files for IDs.
 Store the relation between files and corresponding IDs.
 This will scan all agenda files, all associated archives, and all
@@ -432,7 +431,7 @@ When CHECK is given, prepare detailed information about duplicate IDs."
 		 (delq nil
 		       (mapcar (lambda (b)
 				 (with-current-buffer b
-				   (and (org-mode-p) (buffer-file-name))))
+				   (and (derived-mode-p 'org-mode) (buffer-file-name))))
 			       (buffer-list)))
 		 ;; All files known to have IDs
 		 org-id-files)))
@@ -442,8 +441,9 @@ When CHECK is given, prepare detailed information about duplicate IDs."
 	(setq files (delq 'agenda-archives (copy-sequence files))))
       (setq nfiles (length files))
       (while (setq file (pop files))
-	(message "Finding ID locations (%d/%d files): %s"
-		 (- nfiles (length files)) nfiles file)
+	(unless silent
+	  (message "Finding ID locations (%d/%d files): %s"
+		   (- nfiles (length files)) nfiles file))
 	(setq tfile (file-truename file))
 	(when (and (file-exists-p file) (not (member tfile seen)))
 	  (push tfile seen)
@@ -519,7 +519,8 @@ When CHECK is given, prepare detailed information about duplicate IDs."
     (puthash id (abbreviate-file-name file) org-id-locations)
     (add-to-list 'org-id-files (abbreviate-file-name file))))
 
-(add-hook 'kill-emacs-hook 'org-id-locations-save)
+(unless noninteractive
+  (add-hook 'kill-emacs-hook 'org-id-locations-save))
 
 (defun org-id-hash-to-alist (hash)
   "Turn an org-id hash into an alist, so that it can be written to a file."
@@ -600,15 +601,18 @@ optional argument MARKERP, return the position as a new marker."
 (defun org-id-store-link ()
   "Store a link to the current entry, using its ID."
   (interactive)
-  (let* ((link (org-make-link "id:" (org-id-get-create)))
-	 (case-fold-search nil)
-	 (desc (save-excursion
-		 (org-back-to-heading t)
-		 (or (and (looking-at org-complex-heading-regexp)
-			  (if (match-end 4) (match-string 4) (match-string 0)))
-		     link))))
-    (org-store-link-props :link link :description desc :type "id")
-    link))
+  (when (and (buffer-file-name (buffer-base-buffer)) (derived-mode-p 'org-mode))
+    (let* ((link (org-make-link "id:" (org-id-get-create)))
+	   (case-fold-search nil)
+	   (desc (save-excursion
+		   (org-back-to-heading t)
+		   (or (and (looking-at org-complex-heading-regexp)
+			    (if (match-end 4)
+				(match-string 4)
+			      (match-string 0)))
+		       link))))
+      (org-store-link-props :link link :description desc :type "id")
+      link)))
 
 (defun org-id-open (id)
   "Go to the entry with id ID."
@@ -638,7 +642,3 @@ optional argument MARKERP, return the position as a new marker."
 (provide 'org-id)
 
 ;;; org-id.el ends here
-
-;; arch-tag: e5abaca4-e16f-4b25-832a-540cfb63a712
-
-

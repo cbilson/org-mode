@@ -1,11 +1,10 @@
 ;;; ob-ditaa.el --- org-babel functions for ditaa evaluation
 
-;; Copyright (C) 2009, 2010  Free Software Foundation, Inc.
+;; Copyright (C) 2009-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -35,31 +34,51 @@
 ;; 3) we are adding the "file" and "cmdline" header arguments
 ;;
 ;; 4) there are no variables (at least for now)
+;;
+;; 5) it depends on a variable defined in org-exp-blocks (namely
+;;    `org-ditaa-jar-path') so be sure you have org-exp-blocks loaded
 
 ;;; Code:
 (require 'ob)
 
+(defvar org-ditaa-jar-path) ;; provided by org-exp-blocks
+
 (defvar org-babel-default-header-args:ditaa
-  '((:results . "file") (:exports . "results"))
+  '((:results . "file")
+    (:exports . "results")
+    (:java . "-Dfile.encoding=UTF-8"))
   "Default arguments for evaluating a ditaa source block.")
 
-(defun org-babel-expand-body:ditaa (body params &optional processed-params)
-  "Expand BODY according to PARAMS, return the expanded body." body)
+(defcustom org-ditaa-jar-option "-jar"
+  "Option for the ditaa jar file.
+Do not leave leading or trailing spaces in this string."
+  :group 'org-babel
+  :version "24.1"
+  :type 'string)
 
-(defvar org-ditaa-jar-path)
 (defun org-babel-execute:ditaa (body params)
   "Execute a block of Ditaa code with org-babel.
 This function is called by `org-babel-execute-src-block'."
-  (let ((result-params (split-string (or (cdr (assoc :results params)) "")))
-        (out-file (cdr (assoc :file params)))
-        (cmdline (cdr (assoc :cmdline params)))
-        (in-file (org-babel-temp-file "ditaa-")))
+  (let* ((result-params (split-string (or (cdr (assoc :results params)) "")))
+	 (out-file ((lambda (el)
+		      (or el
+			  (error
+			   "ditaa code block requires :file header argument")))
+		    (cdr (assoc :file params))))
+	 (cmdline (cdr (assoc :cmdline params)))
+	 (java (cdr (assoc :java params)))
+	 (in-file (org-babel-temp-file "ditaa-"))
+	 (cmd (concat "java " java " " org-ditaa-jar-option " "
+		      (shell-quote-argument
+		       (expand-file-name org-ditaa-jar-path))
+		      " " cmdline
+		      " " (org-babel-process-file-name in-file)
+		      " " (org-babel-process-file-name out-file))))
     (unless (file-exists-p org-ditaa-jar-path)
       (error "Could not find ditaa.jar at %s" org-ditaa-jar-path))
     (with-temp-file in-file (insert body))
-    (message (concat "java -jar " org-ditaa-jar-path " " cmdline " " in-file " " out-file))
-    (shell-command (concat "java -jar " (shell-quote-argument org-ditaa-jar-path) " " cmdline " " in-file " " out-file))
-    out-file))
+    (message cmd) (shell-command cmd)
+    nil)) ;; signal that output has already been written to file
 
 (defun org-babel-prep-session:ditaa (session params)
   "Return an error because ditaa does not support sessions."
@@ -67,6 +86,6 @@ This function is called by `org-babel-execute-src-block'."
 
 (provide 'ob-ditaa)
 
-;; arch-tag: 492cd006-07d9-4fac-bef6-5bb60b48842e
+
 
 ;;; ob-ditaa.el ends here

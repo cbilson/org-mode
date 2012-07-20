@@ -1,11 +1,10 @@
 ;;; ob-sass.el --- org-babel functions for the sass css generation language
 
-;; Copyright (C) 2009, 2010  Free Software Foundation, Inc.
+;; Copyright (C) 2009-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -40,11 +39,9 @@
 
 ;;; Code:
 (require 'ob)
+(require 'ob-eval)
 
 (defvar org-babel-default-header-args:sass '())
-
-(defun org-babel-expand-body:sass (body params &optional processed-params)
-  "Expand BODY according to PARAMS, return the expanded body." body)
 
 (defun org-babel-execute:sass (body params)
   "Execute a block of Sass code with Babel.
@@ -54,10 +51,15 @@ This function is called by `org-babel-execute-src-block'."
          (out-file (or file (org-babel-temp-file "sass-out-")))
          (cmdline (cdr (assoc :cmdline params)))
          (in-file (org-babel-temp-file "sass-in-"))
-         (cmd (concat "sass " (or cmdline "") in-file " " out-file)))
+         (cmd (concat "sass " (or cmdline "")
+		      " " (org-babel-process-file-name in-file)
+		      " " (org-babel-process-file-name out-file))))
     (with-temp-file in-file
-      (insert (org-babel-expand-body:sass body params))) (shell-command cmd)
-    (or file (with-temp-buffer (insert-file-contents out-file) (buffer-string)))))
+      (insert (org-babel-expand-body:generic body params)))
+    (org-babel-eval cmd "")
+    (if file
+	nil ;; signal that output has already been written to file
+      (with-temp-buffer (insert-file-contents out-file) (buffer-string)))))
 
 (defun org-babel-prep-session:sass (session params)
   "Raise an error because sass does not support sessions."
@@ -65,6 +67,6 @@ This function is called by `org-babel-execute-src-block'."
 
 (provide 'ob-sass)
 
-;; arch-tag: 2954b169-eef4-45ce-a8e5-3e619f0f07ac
+
 
 ;;; ob-sass.el ends here

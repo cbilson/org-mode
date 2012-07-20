@@ -1,11 +1,10 @@
 ;;; ob-ocaml.el --- org-babel functions for ocaml evaluation
 
-;; Copyright (C) 2009, 2010  Free Software Foundation, Inc.
+;; Copyright (C) 2009-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -44,6 +43,7 @@
 (declare-function tuareg-run-caml "ext:tuareg" ())
 (declare-function tuareg-interactive-send-input "ext:tuareg" ())
 
+(defvar org-babel-tangle-lang-exts)
 (add-to-list 'org-babel-tangle-lang-exts '("ocaml" . "ml"))
 
 (defvar org-babel-default-header-args:ocaml '())
@@ -51,20 +51,12 @@
 (defvar org-babel-ocaml-eoe-indicator "\"org-babel-ocaml-eoe\";;")
 (defvar org-babel-ocaml-eoe-output "org-babel-ocaml-eoe")
 
-(defun org-babel-expand-body:ocaml (body params &optional processed-params)
-  "Expand BODY according to PARAMS, return the expanded body."
-  (let ((vars (nth 1 (or processed-params (org-babel-process-params params)))))
-    (concat
-     (mapconcat
-      (lambda (pair) (format "let %s = %s;;" (car pair)
-			(org-babel-ocaml-elisp-to-ocaml (cdr pair))))
-      vars "\n") "\n" body "\n")))
-
 (defun org-babel-execute:ocaml (body params)
   "Execute a block of Ocaml code with Babel."
-  (let* ((processed-params (org-babel-process-params params))
-         (vars (nth 1 processed-params))
-         (full-body (org-babel-expand-body:ocaml body params processed-params))
+  (let* ((vars (mapcar #'cdr (org-babel-get-header params :var)))
+         (full-body (org-babel-expand-body:generic
+		     body params
+		     (org-babel-variable-assignments:ocaml params)))
          (session (org-babel-prep-session:ocaml
 		   (cdr (assoc :session params)) params))
          (raw (org-babel-comint-with-output
@@ -84,9 +76,9 @@
     (org-babel-reassemble-table
      (org-babel-ocaml-parse-output (org-babel-trim clean))
      (org-babel-pick-name
-      (nth 4 processed-params) (cdr (assoc :colnames params)))
+      (cdr (assoc :colname-names params)) (cdr (assoc :colnames params)))
      (org-babel-pick-name
-      (nth 5 processed-params) (cdr (assoc :rownames params))))))
+      (cdr (assoc :rowname-names params)) (cdr (assoc :rownames params))))))
 
 (defvar tuareg-interactive-buffer-name)
 (defun org-babel-prep-session:ocaml (session params)
@@ -99,6 +91,13 @@
                                           tuareg-interactive-buffer-name)))
     (save-window-excursion (tuareg-run-caml)
                            (get-buffer tuareg-interactive-buffer-name))))
+
+(defun org-babel-variable-assignments:ocaml (params)
+  "Return list of ocaml statements assigning the block's variables"
+  (mapcar
+   (lambda (pair) (format "let %s = %s;;" (car pair)
+			  (org-babel-ocaml-elisp-to-ocaml (cdr pair))))
+   (mapcar #'cdr (org-babel-get-header params :var))))
 
 (defun org-babel-ocaml-elisp-to-ocaml (val)
   "Return a string of ocaml code which evaluates to VAL."
@@ -126,33 +125,20 @@ OUTPUT is string output from an ocaml process."
   "Convert RESULTS into an elisp table or string.
 If the results look like a table, then convert them into an
 Emacs-lisp table, otherwise return the results as a string."
-  (org-babel-read
-   (if (and (stringp results) (string-match "^\\[.+\\]$" results))
-       (org-babel-read
-        (replace-regexp-in-string
-         "\\[" "(" (replace-regexp-in-string
-                    "\\]" ")" (replace-regexp-in-string
-                               "; " " " (replace-regexp-in-string
-                                         "'" "\"" results)))))
-     results)))
+  (org-babel-script-escape (replace-regexp-in-string ";" "," results)))
 
 (defun org-babel-ocaml-read-array (results)
   "Convert RESULTS into an elisp table or string.
 If the results look like a table, then convert them into an
 Emacs-lisp table, otherwise return the results as a string."
-  (org-babel-read
-   (if (and (stringp results) (string-match "^\\[.+\\]$" results))
-       (org-babel-read
-	(concat
-	 "'" (replace-regexp-in-string
-	      "\\[|" "(" (replace-regexp-in-string
-			  "|\\]" ")" (replace-regexp-in-string
-				      "; " " " (replace-regexp-in-string
-						"'" "\"" results))))))
-     results)))
+    (org-babel-script-escape
+     (replace-regexp-in-string
+      "\\[|" "[" (replace-regexp-in-string
+		  "|\\]" "]" (replace-regexp-in-string
+			      "; " "," results)))))
 
 (provide 'ob-ocaml)
 
-;; arch-tag: 2e815f4d-365e-4d69-b1df-dd17fdd7b7b7
+
 
 ;;; ob-ocaml.el ends here

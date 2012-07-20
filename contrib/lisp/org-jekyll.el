@@ -117,8 +117,7 @@ list that holds buffers to release."
     (unless (assoc "layout" yaml-front-matter)
       (push '("layout" . "post") yaml-front-matter))
     (when time
-      (let* ((jekyll/tags (org-get-tags))
-             (heading (org-get-heading t))
+      (let* ((heading (org-get-heading t))
              (title (replace-regexp-in-string "[:=\(\)\?]" ""
                                               (replace-regexp-in-string
                                                "[ \t]" "-" heading)))
@@ -151,7 +150,6 @@ list that holds buffers to release."
                           to-file (org-jekyll-publish-dir project category)))
           (when yaml-front-matter
             (insert "---\n")
-            
             (mapc (lambda (pair) 
                     (insert (format "%s: %s\n" (car pair) (cdr pair))))
                   yaml-front-matter)
@@ -160,13 +158,7 @@ list that holds buffers to release."
                         (insert (format "%s\n" line)))
                       (org-jekyll-slurp-yaml (concat org-jekyll-localize-dir
                                                      lang ".yml"))))
-           (when jekyll/tags
-             (insert "tags:\n")
-             (mapc (lambda (tag)
-                    (when (not (string= tag 'blog)) 
-                      (insert (format " - %s\n" tag))))
-                  jekyll/tags))            
-          (insert "---\n\n"))
+            (insert "---\n\n"))
           (insert html))))))
 
 (defun org-jekyll-export-current-entry ()

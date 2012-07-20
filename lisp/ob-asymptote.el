@@ -1,11 +1,10 @@
 ;;; ob-asymptote.el --- org-babel functions for asymptote evaluation
 
-;; Copyright (C) 2009, 2010 Free Software Foundation, Inc.
+;; Copyright (C) 2009-2012  Free Software Foundation, Inc.
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 
 ;; This file is part of GNU Emacs.
 
@@ -49,24 +48,17 @@
 (declare-function orgtbl-to-generic "org-table" (table params))
 (declare-function org-combine-plists "org" (&rest plists))
 
+(defvar org-babel-tangle-lang-exts)
 (add-to-list 'org-babel-tangle-lang-exts '("asymptote" . "asy"))
 
 (defvar org-babel-default-header-args:asymptote
   '((:results . "file") (:exports . "results"))
   "Default arguments when evaluating an Asymptote source block.")
 
-(defun org-babel-expand-body:asymptote (body params &optional processed-params)
-  "Expand BODY according to PARAMS, return the expanded body."
-  (let ((vars (nth 1 (or processed-params
-                          (org-babel-process-params params)))))
-    (concat (mapconcat 'org-babel-asymptote-var-to-asymptote vars "\n")
-	    "\n" body "\n")))
-
 (defun org-babel-execute:asymptote (body params)
   "Execute a block of Asymptote code.
 This function is called by `org-babel-execute-src-block'."
-  (let* ((processed-params (org-babel-process-params params))
-         (result-params (split-string (or (cdr (assoc :results params)) "")))
+  (let* ((result-params (split-string (or (cdr (assoc :results params)) "")))
          (out-file (cdr (assoc :file params)))
          (format (or (and out-file
                           (string-match ".+\\.\\(.+\\)" out-file)
@@ -74,29 +66,39 @@ This function is called by `org-babel-execute-src-block'."
                      "pdf"))
          (cmdline (cdr (assoc :cmdline params)))
          (in-file (org-babel-temp-file "asymptote-"))
-         (cmd (concat "asy "
-                      (if out-file
-                          (concat "-globalwrite -f " format " -o " out-file)
-                        "-V")
-                      " " cmdline " " in-file)))
+         (cmd
+	  (concat "asy "
+		  (if out-file
+		      (concat
+		       "-globalwrite -f " format
+		       " -o " (org-babel-process-file-name out-file))
+		    "-V")
+		  " " cmdline
+		  " " (org-babel-process-file-name in-file))))
     (with-temp-file in-file
-      (insert (org-babel-expand-body:asymptote body params processed-params)))
+      (insert (org-babel-expand-body:generic
+	       body params
+	       (org-babel-variable-assignments:asymptote params))))
     (message cmd) (shell-command cmd)
-    out-file))
+    nil)) ;; signal that output has already been written to file
 
 (defun org-babel-prep-session:asymptote (session params)
   "Return an error if the :session header argument is set.
 Asymptote does not support sessions"
   (error "Asymptote does not support sessions"))
 
+(defun org-babel-variable-assignments:asymptote (params)
+  "Return list of asymptote statements assigning the block's variables"
+  (mapcar #'org-babel-asymptote-var-to-asymptote
+	  (mapcar #'cdr (org-babel-get-header params :var))))
+
 (defun org-babel-asymptote-var-to-asymptote (pair)
   "Convert an elisp value into an Asymptote variable.
 The elisp value PAIR is converted into Asymptote code specifying
 a variable of the same value."
   (let ((var (car pair))
-        (val (if (symbolp (cdr pair))
-                 (symbol-name (cdr pair))
-               (cdr pair))))
+        (val (let ((v (cdr pair)))
+	       (if (symbolp v) (symbol-name v) v))))
     (cond
      ((integerp val)
       (format "int %S=%S;" var val))
@@ -104,58 +106,45 @@ a variable of the same value."
       (format "real %S=%S;" var val))
      ((stringp val)
       (format "string %S=\"%s\";" var val))
+     ((and (listp val) (not (listp (car val))))
+      (let* ((type (org-babel-asymptote-define-type val))
+	     (fmt (if (eq 'string type) "\"%s\"" "%s"))
+	     (vect (mapconcat (lambda (e) (format fmt e)) val ", ")))
+	(format "%s[] %S={%s};" type var vect)))
      ((listp val)
-      (let* ((dimension-2-p (not (null (cdr val))))
-             (dim (if dimension-2-p "[][]" "[]"))
-             (type (org-babel-asymptote-define-type val))
-             (array (org-babel-asymptote-table-to-array
-                     val
-                     (if dimension-2-p '(:lstart "{" :lend "}," :llend "}")))))
-        (format "%S%s %S=%s;" type dim var array))))))
-
-(defun org-babel-asymptote-table-to-array (table params)
-  "Convert values of an elisp table into a string of an asymptote array.
-Empty cells are ignored."
-  (labels ((atom-to-string (table)
-                           (cond
-                            ((null table) '())
-                            ((not (listp (car table)))
-                             (cons (if (and (stringp (car table))
-                                            (not (string= (car table) "")))
-                                       (format "\"%s\"" (car table))
-                                     (format "%s" (car table)))
-                                   (atom-to-string (cdr table))))
-                            (t
-                             (cons (atom-to-string (car table))
-                                   (atom-to-string (cdr table))))))
-           ;; Remove any empty row
-           (fix-empty-lines (table)
-                            (delq nil (mapcar (lambda (l) (delq "" l)) table))))
-    (orgtbl-to-generic
-     (fix-empty-lines (atom-to-string table))
-     (org-combine-plists '(:hline nil :sep "," :tstart "{" :tend "}") params))))
+      (let* ((type (org-babel-asymptote-define-type val))
+	     (fmt (if (eq 'string type) "\"%s\"" "%s"))
+             (array (mapconcat (lambda (row)
+				 (concat "{"
+					 (mapconcat (lambda (e) (format fmt e))
+						    row ", ")
+					 "}"))
+			       val ",")))
+        (format "%S[][] %S={%s};" type var array))))))
 
 (defun org-babel-asymptote-define-type (data)
   "Determine type of DATA.
-DATA is a list. Type symbol is returned as 'symbol. The type is
-usually the type of the first atom encountered, except for arrays
-of int, where every cell must be of int type."
-  (labels ((anything-but-int (el)
-                             (cond
-                              ((null el) nil)
-                              ((not (listp (car el)))
-                               (cond
-                                ((floatp (car el)) 'real)
-                                ((stringp (car el)) 'string)
-                                (t
-                                 (anything-but-int (cdr el)))))
-                              (t
-                               (or (anything-but-int (car el))
-                                   (anything-but-int (cdr el)))))))
-    (or (anything-but-int data) 'int)))
+
+DATA is a list.  Return type as a symbol.
+
+The type is `string' if any element in DATA is
+a string. Otherwise, it is either `real', if some elements are
+floats, or `int'."
+  (let* ((type 'int)
+	 find-type			; for byte-compiler
+	 (find-type
+	  (function
+	   (lambda (row)
+	     (catch 'exit
+	       (mapc (lambda (el)
+		       (cond ((listp el) (funcall find-type el))
+			     ((stringp el) (throw 'exit (setq type 'string)))
+			     ((floatp el) (setq type 'real))))
+		     row))))))
+    (funcall find-type data) type))
 
 (provide 'ob-asymptote)
 
-;; arch-tag: f2f5bd0d-78e8-412b-8e6c-6dadc94cc06b
+
 
 ;;; ob-asymptote.el ends here

@@ -1,12 +1,10 @@
 ;;; org-remember.el --- Fast note taking in Org-mode
 
-;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010
-;;   Free Software Foundation, Inc.
+;; Copyright (C) 2004-2012 Free Software Foundation, Inc.
 
 ;; Author: Carsten Dominik <carsten at orgmode dot org>
 ;; Keywords: outlines, hypermedia, calendar, wp
 ;; Homepage: http://orgmode.org
-;; Version: 7.01trans
 ;;
 ;; This file is part of GNU Emacs.
 ;;
@@ -34,12 +32,16 @@
 (eval-when-compile
   (require 'cl))
 (require 'org)
+(require 'org-compat)
 (require 'org-datetree)
 
 (declare-function remember-mode "remember" ())
 (declare-function remember "remember" (&optional initial))
 (declare-function remember-buffer-desc "remember" ())
 (declare-function remember-finalize "remember" ())
+(declare-function org-pop-to-buffer-same-window
+		  "org-compat" (&optional buffer-or-name norecord label))
+
 (defvar remember-save-after-remembering)
 (defvar remember-register)
 (defvar remember-buffer)
@@ -157,7 +159,7 @@ Furthermore, the following %-escapes will be replaced with content:
 Apart from these general escapes, you can access information specific to the
 link type that is created.  For example, calling `remember' in emails or gnus
 will record the author and the subject of the message, which you can access
-with %:author and %:subject, respectively.  Here is a complete list of what
+with %:fromname and %:subject, respectively.  Here is a complete list of what
 is recorded for each link type.
 
 Link type          |  Available information
@@ -167,7 +169,8 @@ vm, wl, mh, rmail  |  %:type %:subject %:message-id
                    |  %:from %:fromname %:fromaddress
                    |  %:to   %:toname   %:toaddress
                    |  %:fromto (either \"to NAME\" or \"from NAME\")
-gnus               |  %:group, for messages also all email fields
+gnus               |  %:group, for messages also all email fields and
+                   |  %:org-date (the Date: header in Org format)
 w3, w3m            |  %:type %:url
 info               |  %:type %:file %:node
 calendar           |  %:type %:date"
@@ -273,9 +276,6 @@ error or Emacs crashed, for example) nil is more useful.  In the
 opposite case, the default, t, is more useful."
   :group 'org-remember
   :type 'boolean)
-
-(defvar annotation) ; from remember.el, dynamically scoped in `remember-mode'
-(defvar initial)    ; from remember.el, dynamically scoped in `remember-mode'
 
 ;;;###autoload
 (defun org-remember-insinuate ()
@@ -428,10 +428,10 @@ to be run from that hook to function properly."
 	     ;; `initial' and `annotation' are bound in `remember'.
 	     ;; But if the property list has them, we prefer those values
 	     (v-i (or (plist-get org-store-link-plist :initial)
-		      (and (boundp 'initial) initial)
+		      (and (boundp 'initial) (symbol-value 'initial))
 		      ""))
 	     (v-a (or (plist-get org-store-link-plist :annotation)
-		      (and (boundp 'annotation) annotation)
+		      (and (boundp 'annotation) (symbol-value 'annotation))
 		      ""))
 	     ;; Is the link empty?  Then we do not want it...
 	     (v-a (if (equal v-a "[[]]") "" v-a))
@@ -473,7 +473,7 @@ to be run from that hook to function properly."
 	(erase-buffer)
 	(insert (substitute-command-keys
 		 (format
-"## %s  \"%s\" -> \"* %s\"
+		  "## %s  \"%s\" -> \"* %s\"
 ## C-u C-c C-c  like C-c C-c, and immediately visit note at target location
 ## C-0 C-c C-c  \"%s\" -> \"* %s\"
 ## %s  to select file and header location interactively.
@@ -502,18 +502,20 @@ to be run from that hook to function properly."
 				       filename error)))))))
 	;; Simple %-escapes
 	(goto-char (point-min))
-	(while (re-search-forward "%\\([tTuUaiAcxkKI]\\)" nil t)
-	  (unless (org-remember-escaped-%)
-	    (when (and initial (equal (match-string 0) "%i"))
-	      (save-match-data
-		(let* ((lead (buffer-substring
-			      (point-at-bol) (match-beginning 0))))
-		  (setq v-i (mapconcat 'identity
-				       (org-split-string initial "\n")
-				       (concat "\n" lead))))))
-	    (replace-match
-	     (or (eval (intern (concat "v-" (match-string 1)))) "")
-	     t t)))
+	(let ((init (and (boundp 'initial)
+			 (symbol-value 'initial))))
+	  (while (re-search-forward "%\\([tTuUaiAcxkKI]\\)" nil t)
+	    (unless (org-remember-escaped-%)
+	      (when (and init (equal (match-string 0) "%i"))
+		(save-match-data
+		  (let* ((lead (buffer-substring
+				(point-at-bol) (match-beginning 0))))
+		    (setq v-i (mapconcat 'identity
+					 (org-split-string init "\n")
+					 (concat "\n" lead))))))
+	      (replace-match
+	       (or (eval (intern (concat "v-" (match-string 1)))) "")
+	       t t))))
 
 	;; %() embedded elisp
 	(goto-char (point-min))
@@ -533,10 +535,10 @@ to be run from that hook to function properly."
 	(when plist-p
 	  (goto-char (point-min))
 	  (while (re-search-forward "%\\(:[-a-zA-Z]+\\)" nil t)
-	  (unless (org-remember-escaped-%)
-	    (and (setq x (or (plist-get org-store-link-plist
-					(intern (match-string 1))) ""))
-		 (replace-match x t t)))))
+	    (unless (org-remember-escaped-%)
+	      (and (setq x (or (plist-get org-store-link-plist
+					  (intern (match-string 1))) ""))
+		   (replace-match x t t)))))
 
 	;; Turn on org-mode in the remember buffer, set local variables
 	(let ((org-inhibit-startup t)) (org-mode) (org-remember-mode 1))
@@ -784,7 +786,7 @@ The user is queried for the template."
       (setq heading org-remember-default-headline))
     (setq visiting (org-find-base-buffer-visiting file))
     (if (not visiting) (find-file-noselect file))
-    (switch-to-buffer (or visiting (get-file-buffer file)))
+    (org-pop-to-buffer-same-window (or visiting (get-file-buffer file)))
     (widen)
     (goto-char (point-min))
     (if (re-search-forward
@@ -940,7 +942,7 @@ See also the variable `org-reverse-note-order'."
 	(throw 'quit t))
       ;; Find the file
       (with-current-buffer (or visiting (find-file-noselect file))
-	(unless (or (org-mode-p) (member heading '(top bottom)))
+	(unless (or (derived-mode-p 'org-mode) (member heading '(top bottom)))
 	  (error "Target files for notes must be in Org-mode if not filing to top/bottom"))
 	(save-excursion
 	  (save-restriction
@@ -950,7 +952,7 @@ See also the variable `org-reverse-note-order'."
 	    ;; Find the default location
 	    (when heading
 	      (cond
-	       ((not (org-mode-p))
+	       ((not (derived-mode-p 'org-mode))
 		(if (eq heading 'top)
 		    (goto-char (point-min))
 		  (goto-char (point-max))
@@ -1003,7 +1005,7 @@ See also the variable `org-reverse-note-order'."
 	     ((eq org-remember-interactive-interface 'outline-path-completion)
 	      (let ((org-refile-targets '((nil . (:maxlevel . 10))))
 		    (org-refile-use-outline-path t))
-		(setq spos (org-refile-get-location "Heading: ")
+		(setq spos (org-refile-get-location "Heading")
 		      exitcmd 'return
 		      spos (nth 3 spos))))
 	     (t (error "This should not happen")))
@@ -1011,7 +1013,7 @@ See also the variable `org-reverse-note-order'."
 					; not handle this note
 	    (and visitp (run-with-idle-timer 0.01 nil 'org-remember-visit-immediately))
 	    (goto-char spos)
-	    (cond ((org-on-heading-p t)
+	    (cond ((org-at-heading-p t)
 		   (org-back-to-heading t)
 		   (setq level (funcall outline-level))
 		   (cond
@@ -1071,7 +1073,7 @@ See also the variable `org-reverse-note-order'."
 		   (save-restriction
 		     (widen)
 		     (goto-char (point-min))
-		     (re-search-forward "^\\*+ " nil t)
+		     (re-search-forward org-outline-regexp-bol nil t)
 		     (beginning-of-line 1)
 		     (org-paste-subtree 1 txt)
 		     (and org-auto-align-tags (org-set-tags nil t))
@@ -1148,7 +1150,4 @@ See also the variable `org-reverse-note-order'."
 
 (provide 'org-remember)
 
-;; arch-tag: 497f30d0-4bc3-4097-8622-2d27ac5f2698
-
 ;;; org-remember.el ends here
-
